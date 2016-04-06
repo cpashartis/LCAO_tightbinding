@@ -7,10 +7,10 @@
 data_VESTA_phase_1
 
 
-_pd_phase_name                         'Si2'
-_cell_length_a                         3.86697
-_cell_length_b                         3.86697
-_cell_length_c                         3.86697
+_pd_phase_name                         'New structure'
+_cell_length_a                         5.46876
+_cell_length_b                         5.46876
+_cell_length_c                         5.46876
 _cell_angle_alpha                      60.00000
 _cell_angle_beta                       60.00000
 _cell_angle_gamma                      60.00000
@@ -30,5 +30,5 @@ loop_
    _atom_site_adp_type
    _atom_site_B_iso_or_equiv
    _atom_site_type_symbol
-   Si1        1.0     0.000000      0.000000      0.000000     Biso  1.000000 Si
-   Si2        1.0     0.250000      0.250000      0.250000     Biso  1.000000 Si
+   Si         1.0     0.000000      0.000000      0.000000     Biso  1.000000 Si
+   Si         1.0     0.250000      0.250000      0.250000     Biso  1.000000 Si
