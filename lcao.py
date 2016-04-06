@@ -18,20 +18,16 @@ rc_file('/Users/cpashartis/bin/rcplots/paper_multi.rc')
 
 class LCAO:
     
-    def __init__(self):
+    def __init__(self,filename):
         
-        print 'stuff goes here'
-        
-    def load_struct(self, filename):
         """Method for determining the structure of the file being input,
         currently limited to crystal / wigner - seitz structures. Import the
         cif file here for use of atomic structures"""
         
-        self.struct = pm.Structure.from_file(filename, primitive = False)
+        self.struct = pm.Structure.from_file(filename, primitive = False)        
         
-        return 0
-       
-    def diamond_init(self, delta_E, V_ssSigma, V_spSigma, V_ppSigma, V_ppPi):
+    @staticmethod
+    def diamond_init(delta_E, V_ssSigma, V_spSigma, V_ppSigma, V_ppPi):
         
 #        V_ss = 4. * V_ssSigma
 #        V_sp = 4. * V_spSigma/np.sqrt(3)
@@ -42,10 +38,13 @@ class LCAO:
         
     #def _func_exp(self, d, k):
         
-    def diamond_g(self, d, k):
+    @staticmethod
+    def diamond_g(d, k):
         """Diamond structure plane wave components, 
         returns vector for all k points"""
         #may be forgetting pi here
+        #make sure g is complex
+        
         return_array = \
              1/4.*np.array([np.exp(1.j*np.dot(d[0,:], k)) \
                 + np.exp(1.j*np.dot(d[1,:], k))\
@@ -59,7 +58,8 @@ class LCAO:
 
         return return_array
        
-    def diamond_nn_H(self, g, (delta_E, V_ss, V_sp, V_xx, V_xy), sym_fac ):
+    @staticmethod
+    def diamond_nn_H(g, (delta_E, V_ss, V_sp, V_xx, V_xy), sym_fac ):
         
         """Diamond tight binding interaction energy term for nearest neighbour
         interactions of s and p type orbitals, total of 8 interactions"""
@@ -68,6 +68,7 @@ class LCAO:
         E_s = -1.*delta_E
         
         V_sp = V_sp * sym_fac
+        V_xy = V_xy * sym_fac
         
         H = np.matrix([[E_s, V_ss * g[0], 0,0,0,V_sp*g[1], V_sp*g[2], V_sp*g[3]],
         [V_ss*np.conj(g[0]),E_s, -1*V_sp*np.conj(g[1]), -1*V_sp*np.conj(g[2]),\
@@ -84,17 +85,17 @@ class LCAO:
        
         return H
        
-    def k_points(self, sym_pts = 0, coarse = 0): 
+    @staticmethod
+    def k_points(sym_pts = 0, coarse = 0): 
         
         if sym_pts == 0:
-            sym_pts = np.array([[.5,.5,.5], [0,0,0], [1,0,0], [1,1,1]],
-                                  dtype = float)
+            sym_pts = np.array([[.5,.5,.5], [0,0,0], [1,0,0]], dtype = float)
             #L,GAMMA,X,GAMMA
 #            sym_pts = np.array([[0.5, 0.5, 0.5],[0.0, 0.0, 0.0],
 #                                [0.0, 0.5, 0.5],[1.0, 1.0, 1.0]],
 #                                dtype = float)
         if coarse == 0 :
-            coarse = np.array([100,100,200])
+            coarse = np.array([100,100])
             
         if len(coarse) != len(sym_pts) - 1:
             raise IndexError("The length of the coarse \
@@ -162,17 +163,19 @@ class LCAO:
         
         #ex two basis silicon, remove all other neighbors, fix self.struct
         if single_test == True:
-            neighbors.pop()
-            self.struct.pop()
+            for i in range(len(self.struct.sites)-1):
+                self.struct.pop()
+                neighbors.pop()
             
         i = 0
         eig_list = []   
         #sym_neg = {}
-        #sym_neg = {str(prim_struct.sites[0].frac_coords):1} #assign first as 1
-        #sym_counter = 1
+        sym_neg = {str(prim_struct.sites[0].frac_coords):1} #assign first as 1
+        sym_counter = 1
+        #cntr = 1
         for kpt in k_points:
             diag_Hs = []
-            cntr = 1###########change to 0
+            #cntr = 1###########change to 0
             for nearests in neighbors:
                 #sym_counter *=-1 #multiply by negative 1 for each new position
                 #format is list of [sites]
@@ -180,23 +183,33 @@ class LCAO:
                 for nearest in nearests:
                     #coord = nearests[0][0].frac_coords          
                 
-                    #sym_neg = self.__check_Sym_Neg__(sym_neg, coord, sym_counter)                     
-                    #cartesian coordinates of nearest neighbour
-                    #fractional coordinates, allows for no use of lattice constant
-                    #also allows for reduced coords
-                    d.append(nearest[0].frac_coords - self.struct.sites[i].frac_coords)
-                  
+                    #---- need to change to accomodate any cell, for now only diamond
+                    neighb_coord = nearest[0].coords - self.struct.sites[i].coords
+                    #matrix times array gives unitless
+                    #latticeless_coord_cart = np.matrix(self.struct.sites[i]\
+                    #                    .lattice.matrix).T.I*neighb_coord.reshape((3,1))
+                    #d.append(np.array(latticeless_coord_cart).reshape(3))
+                    
+                    #assuming symmetry find cubic box
+                    #a0 = np.linalg.norm(np.matrix(self.struct.lattice.matrix).I\
+                    #    * self.struct.lattice.matrix[:,0].reshape((3,1)))
+#############                    
+                    a0 = np.sqrt(2)* self.struct.lattice.a
+                    print a0
+                    d.append(neighb_coord/a0)
+##############
                 d = np.array(d)
+                #
+                #d = np.array([[1,1,1], [1,-1,-1], [-1,1,-1],[-1,-1,1]])*1/4.
+                #
                 cur_g = g(d,kpt)
-                print cur_g
-                print cntr
-                diag_Hs.append( nn_H(cur_g, params, cntr) )
-                cntr *= -1#########change to +1 when have the sym working
+                diag_Hs.append( nn_H(cur_g, params, -1) )
+                sym_counter *= -1#########change to +1 when have the sym working
                 
             #glue together individual Hs
             #hard coded 6 :()
             size = len(self.struct.sites) * interactions
-            H = np.matrix(np.zeros((size,size)))
+            H = np.matrix(np.zeros((size,size)), dtype = complex)
             for j in range(0,len(self.struct.sites)): #transfer diags to H
                 try:
                     H[interactions*j:interactions*(j+1),
@@ -227,10 +240,10 @@ if __name__ == '__main__':
     V_xx = 3.17
     V_xy = 7.51
 
-    a = LCAO()
-    a.load_struct('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/Si_2atom.cif')  #'Si_1atom.cif'
-    eig, kpt = a.build_H(a.diamond_nn_H, a.diamond_g, a.k_points(), a.diamond_init(E_p,
-              V_ss,V_sp,V_xx, V_xy) )
+    a = LCAO('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/POSCAR.Si_16atom')
+    #a.load_struct()  #'Si_1atom.cif'
+    eig, kpt = a.build_H(a.diamond_nn_H, a.diamond_g, a.k_points(), ((E_p,
+              V_ss,V_sp,V_xx, V_xy)) )
    
     f = plt.figure()
     ax = f.add_subplot(111)
@@ -245,3 +258,4 @@ if __name__ == '__main__':
     ax.set_title('Silicon Tight Binding')
     ax.set_ylabel('Energy (eV)')
     f.savefig('Silicon_TB.pdf', dpi = 1000 )
+    plt.close('all')
