@@ -24,7 +24,7 @@ class LCAO:
         currently limited to crystal / wigner - seitz structures. Import the
         cif file here for use of atomic structures"""
         
-        self.struct = pm.Structure.from_file(filename, primitive = False)        
+        self.struct = pm.Structure.from_file(filename, primitive = False)   
         
     @staticmethod
     def diamond_init(delta_E, V_ssSigma, V_spSigma, V_ppSigma, V_ppPi):
@@ -62,7 +62,9 @@ class LCAO:
     def diamond_nn_H(g, (delta_E, V_ss, V_sp, V_xx, V_xy), sym_fac ):
         
         """Diamond tight binding interaction energy term for nearest neighbour
-        interactions of s and p type orbitals, total of 8 interactions"""
+        interactions of s and p type orbitals 4x4 matrix from Peter Young
+        semiconductor physics. Where nearest neighbours are required for each
+        element"""
         
         E_p = 0
         E_s = -1.*delta_E
@@ -113,20 +115,10 @@ class LCAO:
             start_pt = end_pt.copy()
     
         return np.array(kpts)*2*np.pi#self.struct.lattice.a #assuming similar dimensional lattice
-        
-    def build_H(self, nn_H, g, k_points, params , interactions = 8, single_test = True):#, int_function = 0):
-        """Assumes use of crystal structure
-        
-        The input must be dictioniaries of the atom in which the overlaps
-        or energies are describing, ex.
-        
-        #Args:
-        
-            dict_atom_tight - dictionary with element symbol as key and with 
-                            delta_E, E_xx
-                            
-        """
-
+       
+    @classmethod
+    def find_neighbours(self):
+        """Generate nearest neighbours from pymatgen code to prep for hamiltonian"""
         #for each atom site find nearest neigbours
         #assume diamond structure
             
@@ -160,52 +152,122 @@ class LCAO:
                 exit()
         
         neighbors = self.struct.get_all_neighbors(nn_distance+0.01) #0.01 to get all
+                
+        return neighbors, prim_struct
+                
+    def build_diamond_nn_H(self, g, k_points, params , interactions = 4):#, int_function = 0):
+        """Assumes use of crystal structure
         
-        #ex two basis silicon, remove all other neighbors, fix self.struct
-        if single_test == True:
-            for i in range(len(self.struct.sites)-1):
-                self.struct.pop()
-                neighbors.pop()
-            
+        The input must be dictioniaries of the atom in which the overlaps
+        or energies are describing, ex.
+        
+        Note this only works if the structure given has the typical lattice
+        vectors (or factors of these vectors)
+        
+        0.5  0.0  0.5
+        0.0  0.5  0.5
+        0.5  0.5  0.0
+        
+        Currently assumes input of sublattice order.
+        
+        Args:
+            params - (delta_E, V_ss, V_sp, V_xx, V_xy), is a tuple of the
+                    tightbinding coefficients, if only sigma and pi bonds known
+                    see method diamond_init
+            dict_atom_tight - dictionary with element symbol as key and with 
+                            delta_E, E_xx
+                            
+        """
+
+        delta_E, V_ss, V_sp, V_xx, V_xy = params
+        neighbors, prim_struct = self.find_neighbours()
         i = 0
-        eig_list = []   
-        #sym_neg = {}
-        sym_neg = {str(prim_struct.sites[0].frac_coords):1} #assign first as 1
+        eig_list = []
+        neig_coords = np.array()
+#        #sym_neg = {}
+#        sym_neg = {str(prim_struct.sites[0].frac_coords):1} #assign first as 1
+#        sym_counter = -1 #start at negative for positive starting site
+        
         sym_counter = 1
-        #cntr = 1
         for kpt in k_points:
-            diag_Hs = []
-            #cntr = 1###########change to 0
+            site_H = []
+            #we want to build a (4xN)x(4xN) matrix
+            ################################################
+            #loop to find path of -1, +1s, by starting with one site and adding
+            #neighbors and keep repeating
+            #this could be fixed (somehow) by determining sublattices
+            #NNNNNNNNNEEEEEEEEEEDED STILL
+            ################################################################
+            
+            #loop through each site's neighbors
+            site_i = 0
+            H = np.matrix(np.zeros((size,size)), dtype = complex)
             for nearests in neighbors:
                 #sym_counter *=-1 #multiply by negative 1 for each new position
                 #format is list of [sites]
-                d = []
-                for nearest in nearests:
-                    #coord = nearests[0][0].frac_coords          
-                
-                    #---- need to change to accomodate any cell, for now only diamond
-                    neighb_coord = nearest[0].coords - self.struct.sites[i].coords
-                    #matrix times array gives unitless
-                    #latticeless_coord_cart = np.matrix(self.struct.sites[i]\
-                    #                    .lattice.matrix).T.I*neighb_coord.reshape((3,1))
-                    #d.append(np.array(latticeless_coord_cart).reshape(3))
                     
-                    #assuming symmetry find cubic box
-                    #a0 = np.linalg.norm(np.matrix(self.struct.lattice.matrix).I\
-                    #    * self.struct.lattice.matrix[:,0].reshape((3,1)))
-#############                    
-                    a0 = np.sqrt(2)* self.struct.lattice.a
-                    print a0
-                    d.append(neighb_coord/a0)
-##############
+                d = []
+                #swap if element is halfway through, i.e. next sublattice
+                if len(prim_struct.sites)/2 - 1 == cntr:
+                    sym_counter = -1
+#------------------------------------------------------
+#Generate Hamiltonian for a specific kpt.
+                
+                #generate hamiltonian for this specific element (i.e. 4x4 matrix)
+                
+    #---------
+    #first build diagonal i.e. s1,px1, py1, pz1  s1, px1, py1, pz1
+                H_diag = np.matrix([ [E_s, 0, 0, 0],
+                                     [0, E_p, 0, 0],
+                                     [0, 0, E_p, 0],
+                                     [0, 0, 0 , E_p] ])
+                H[interactions*site_i:interactions*(site_i+1),
+                  interactions*site_i:interactions*(site_i+1)]= H_diag     
+  
+
+                    
+    #---------
+    #build off diagonals
+                    #first find if one of the neighbors is in the structure
+                    try:
+                        site_off_i = prim_struct.sites.index(nearest)
+                        
+                        #we have already done this so move along.
+                        if H[interactions(site_off_i,site_off_i)] != 0.0:
+                            continue
+                        
+                        #now add components
+                        #ex s1, with s2, px2, py2, pz2
+                        H_off = np.matrix([ [, 0, 0, 0],
+                                     [0, E_p, 0, 0],
+                                     [0, 0, E_p, 0],
+                                     [0, 0, 0 , E_p] ])
+                        H[interactions*site_i:interactions*(site_i+1),
+                interactions*site_off_i:interactions*(site_off_i+1)] = H_off
+                        #now do the opposite side of the hamiltonian
+                        H[interactions*site_off_i:interactions*(site_off_i+1),
+                          interactions*site_i:interactions*(site_i+1)] =\
+                              H_off.conjugate().T
+                          
+                        
+                        
+                    except ValueError: #i.e. it isn't in the list
+                        #don't worry about the hamiltonian, move along
+                        continue
+                        
+                
                 d = np.array(d)
                 #
                 #d = np.array([[1,1,1], [1,-1,-1], [-1,1,-1],[-1,-1,1]])*1/4.
                 #
+                #generate g vectors according to Peter Young Semiconductor Physics
                 cur_g = g(d,kpt)
-                diag_Hs.append( nn_H(cur_g, params, -1) )
-                sym_counter *= -1#########change to +1 when have the sym working
                 
+                site_i += 1
+                
+#Generate Hamiltonian for a specific kpt.
+#------------------------------------------------------ 
+                             
             #glue together individual Hs
             #hard coded 6 :()
             size = len(self.struct.sites) * interactions
