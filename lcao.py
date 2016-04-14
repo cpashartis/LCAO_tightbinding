@@ -196,10 +196,16 @@ class LCAO:
         a0 = np.sqrt(2)* self.struct.lattice.a
         neigh_dist_frac = self.struct.sites[0].coords[0] - \
             neighbors[0][0][0].coords[0]/a0
-        d = np.array([  [1, 1, 1],
-                        [1, -1, -1],
-                        [-1, 1, -1],
-                        [-1, -1, 1] ]) *1/4.#* neigh_dist_frac
+            
+        #nearest neighbor d
+        d = []
+        for nearest in neighbors[0]:
+            d.append( nearest[0].coords - self.struct.sites[0].coords )
+        d = np.array(d)
+#        d = np.array([  [1, 1, 1],
+#                        [1, -1, -1],
+#                        [-1, 1, -1],
+#                        [-1, -1, 1] ]) *1/4.#* neigh_dist_frac
         lat_fac = 1
         size = len(self.struct.sites) * interactions
         for kpt in k_points:
@@ -323,12 +329,12 @@ class LCAO:
         
 if __name__ == '__main__':
     
-    E_s = 0
-    E_p = 7.2
-    V_ss = -8.13/4
-    V_sp = 5.88/4
-    V_xx = 3.17/4
-    V_xy = 7.51/4
+    E_s = -7.2#0
+    E_p = 0 #7.2
+    V_ss = -8.13
+    V_sp = 0#5.88/4
+    V_xx = 0#3.17/4
+    V_xy = 0#7.51/4
 
     a = LCAO('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/POSCAR.Si_16atom')
     #a.load_struct()  #'Si_1atom.cif'
