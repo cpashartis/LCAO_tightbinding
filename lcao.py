@@ -12,10 +12,6 @@ Tight Binding LCAO approach
 import numpy as np
 import pymatgen as pm
 from sys import exit
-from matplotlib import pyplot as plt
-from matplotlib import rc_file
-rc_file('/Users/cpashartis/bin/rcplots/paper_multi.rc')
-
 class LCAO:
     
     def __init__(self,filename):
@@ -25,16 +21,6 @@ class LCAO:
         cif file here for use of atomic structures"""
         
         self.struct = pm.Structure.from_file(filename, primitive = False)   
-        
-    @staticmethod
-    def diamond_init(delta_E, V_ssSigma, V_spSigma, V_ppSigma, V_ppPi):
-        
-#        V_ss = 4. * V_ssSigma
-#        V_sp = 4. * V_spSigma/np.sqrt(3)
-#        V_xx = (4.*V_ppSigma/3) + (8.*V_ppPi/3)
-#        V_xy = (4.*V_ppSigma/3) - (4.*V_ppPi/3)
-        
-        return (delta_E, V_ss, V_sp, V_xx, V_xy)
         
     #def _func_exp(self, d, k):
         
@@ -87,35 +73,35 @@ class LCAO:
        
         return H
        
-    @staticmethod
-    def k_points(sym_pts = 0, coarse = 0): 
+    def k_points(self, sym_pts = 0, coarse = 0): 
         
         if sym_pts == 0:
-            sym_pts = np.array([[.5,.5,.5], [0,0,0], [1,0,0]], dtype = float)
+#            sym_pts = np.array([[.5,.5,.5], [0,0,0], [1,0,0]], dtype = float)
 #            L,GAMMA,X,GAMMA
-#            sym_pts = np.array([[0.5, 0.5, 0.5],[0.0, 0.0, 0.0],
-#                                [0.0, 0.5, 0.5]],
-#                                dtype = float)
+            sym_pts = np.array([[0.5, 0, 0],[0.0, 0.0, 0.0],
+                                [0.0, 0.5, 0.5], [1,1,1]],
+                                dtype = float)
+            sym_pts = np.matrix(sym_pts)*np.matrix(self.struct.reciprocal_lattice.matrix)
         if coarse == 0 :
-            coarse = np.array([100,100])
+            coarse = np.array([100,100,100])
             
         if len(coarse) != len(sym_pts) - 1:
             raise IndexError("The length of the coarse \
                 should be one less sym_points")
         
+        sym_pts = np.array(sym_pts) #convert back for np useage
         start_pt = sym_pts[0,:]
         kpts = []
         #generate grid
-        for ind in range(1,len(sym_pts)):
+        for ind in range(1,sym_pts.shape[0]):
             end_pt = sym_pts[ind,:]
-            diff = end_pt-start_pt
             #double counts endpts
             kx,ky,kz = [np.linspace(start_pt[i], end_pt[i], coarse[ind-1]).reshape(coarse[ind-1],1) for i in range(3)]
             kpts.extend(np.concatenate((kx,ky,kz), axis = 1))
             start_pt = end_pt.copy()
         #print kpts
         #kpts = [[0.,0.,0.]]
-        return np.array(kpts)*2*np.pi#self.struct.lattice.a #assuming similar dimensional lattice
+        return kpts #np.array(kpts)*2*np.pi#self.struct.lattice.a #assuming similar dimensional lattice
        
     def find_neighbours(self):
         """Generate nearest neighbours from pymatgen code to prep for hamiltonian"""
@@ -183,30 +169,11 @@ class LCAO:
         CAN MAKE FASTER BY GETTING RID OF G AND JUST BUILDING PLACEMENT
                             
         """
-
         #print params
-        delta_E, V_ss, V_sp, V_xx, V_xy = params
+        delta_E, V_sSig, V_spSig, V_ppSig, V_ppPi = params
         neighbors, prim_struct = self.find_neighbours()
         eig_list = []
-#        #sym_neg = {}
-#        sym_neg = {str(prim_struct.sites[0].frac_coords):1} #assign first as 1
-#        sym_counter = -1 #start at negative for positive starting site
         
-        #get the unitless distance vector
-        a0 = np.sqrt(2)* self.struct.lattice.a
-        neigh_dist_frac = self.struct.sites[0].coords[0] - \
-            neighbors[0][0][0].coords[0]/a0
-            
-        #nearest neighbor d
-        d = []
-        for nearest in neighbors[0]:
-            d.append( nearest[0].coords - self.struct.sites[0].coords )
-        d = np.array(d)
-#        d = np.array([  [1, 1, 1],
-#                        [1, -1, -1],
-#                        [-1, 1, -1],
-#                        [-1, -1, 1] ]) *1/4.#* neigh_dist_frac
-        lat_fac = 1
         size = len(self.struct.sites) * interactions
         for kpt in k_points:
             #we want to build a (4xN)x(4xN) matrix
@@ -220,14 +187,18 @@ class LCAO:
             #loop through each site's neighbors
             site_i = 0
             H = np.matrix(np.zeros((size,size)), dtype = complex)
-            cur_g = g(d,kpt)
+            #cur_g = g(d,kpt)
+            dz_l = []
+            dy_l = []
+            dx_l = []
+            phase_l = []
             for nearests in neighbors:
                 #sym_counter *=-1 #multiply by negative 1 for each new position
                 #format is list of [sites]
                     
                 #swap if element is halfway through, i.e. next sublattice
-                if len(self.struct.sites)/2 - 1 == site_i:
-                    lat_fac = -1
+#                if len(self.struct.sites)/2 - 1 == site_i:
+#                    lat_fac = -1
 #------------------------------------------------------
 #Generate Hamiltonian for a specific kpt.
                 
@@ -246,6 +217,7 @@ class LCAO:
                 for nearest in nearests:
                     
                     nearest = nearest[0] #it was a tuple
+                    d = nearest.coords - self.struct.sites[site_i].coords
 #                    neighb_coord = nearest.coords - self.struct.sites[i].coords
 #                    #get rid of lattice constant as the diamond k points are unitless
 #                    a0 = np.sqrt(2)* self.struct.lattice.a
@@ -263,95 +235,101 @@ class LCAO:
                     #if no periodic image then we don't use in hamiltonian
                     if site_off_i == -1:
                         continue
-                            
-                    #so if it is true, we have the site as i
-                    #find index
-                    #site_off_i = self.struct.sites.index(nearest)
-                        
-                    #we have already done this so move along, checking diag
-#                    if H[interactions*site_off_i, interactions*site_off_i]\
-#                    != 0.0:
-#                        continue
                     
                     #now add components
                     #ex s1, with s2, px2, py2, pz2
+                    phase = np.exp(1.0j*np.dot(d, kpt))
+                    dx = np.dot(d/np.linalg.norm(d),[1,0,0])
+                    dy = np.dot(d/np.linalg.norm(d),[0,1,0])
+                    dz = np.dot(d/np.linalg.norm(d),[0,0,1])
+                    #ss
+                    #s1 p_x2
+                    #s1 p_y2
+                    #s1 p_z2
+                    #px1 s2 -1 for opposite lobe
+                    #0
+                    #0
+                    #0
+                    #py1 s2 (-1)
+                    #0
+                    #0
+                    #0
+                    #pz1 s2 (-1)
+                    #0
+                    #0
+                    #0
                     H_off = np.matrix([
-    [V_ss * cur_g[0], V_sp*cur_g[1], V_sp*cur_g[2], V_sp*cur_g[3]],
-    [-1*V_sp*cur_g[1], V_xx*cur_g[0], V_xy*cur_g[3], V_xy*cur_g[2]],
-    [-1*V_sp*cur_g[2], V_xy*cur_g[3], V_xx*cur_g[0], V_xy * cur_g[1]],
-    [-1*V_sp*cur_g[3], V_xy*cur_g[2], V_xy*cur_g[1], V_xx*cur_g[0]] ])
+    [V_sSig * phase, V_spSig * dx * phase,
+         V_spSig * dy * phase, V_spSig * dz * phase], 
+    [V_spSig *-1* dx * phase, (V_ppSig * dx**2 + V_ppPi *(1-dx**2))*phase,
+         dx*dy*(V_ppSig-V_ppPi)*phase, dx*dz*(V_ppSig-V_ppPi)*phase],
+    [V_spSig *-1* dy * phase, dy*dx*(V_ppSig-V_ppPi)*phase,
+         (V_ppSig * dy**2 + V_ppPi *(1-dy**2))*phase,
+        dy*dz*(V_ppSig-V_ppPi)*phase],
+    [V_spSig *-1* dz * phase, dz*dx*(V_ppSig-V_ppPi)*phase, 
+         dz*dy*(V_ppSig-V_ppPi)*phase,
+        (V_ppSig * dz**2 + V_ppPi *(1-dz**2))*phase] ] )
+        
+#                    H_off[1,1] = 0.
+#                    H_off[2,2] = 0.
+#                    H_off[3,3] = 0.
                                  
-                    if lat_fac == 1:
-                        #top right
-                        H[interactions*site_i:interactions*(site_i+1),
-                interactions*site_off_i:interactions*(site_off_i+1)] = H_off
-                        #now do the opposite side of the hamiltonian, bottom left
-                        H[interactions*site_off_i:interactions*(site_off_i+1),
-                          interactions*site_i:interactions*(site_i+1)] =\
-                              H_off.conjugate().T
-                    else: #now we have to do the reverse as above H
-                        #top right
-                        H[interactions*site_i:interactions*(site_i+1),
-                interactions*site_off_i:interactions*(site_off_i+1)] =\
-                        H_off.conjugate().T
-                        #now do the opposite side of the hamiltonian, bottom
-                        H[interactions*site_off_i:interactions*(site_off_i+1),
-                          interactions*site_i:interactions*(site_i+1)] =\
-                              H_off
-                    #example: for 16 atom basis, first (4x8) columns are
-                    #sublattice 1, so they are the not conjugated
-                              
-#                    except ValueError: #i.e. it isn't in the list
-#                        #check if periodic image.
-#                        if [nearest.is_periodic_image(i) for i in self.struct.sites]:
-#                            #so if it is true, we have the site as i
-#                            #find index
-#                            site_off_i = self.struct.sites.index(i)
-#                            
-#                        #don't worry about the hamiltonian, move along
-#                        #continue
-            
+                    H[interactions*site_i:interactions*(site_i+1),
+            interactions*site_off_i:interactions*(site_off_i+1)] += H_off
+                    
+                    dz_l.append(dz)
+                    dy_l.append(dy)
+                    dx_l.append(dx)
+                    phase_l.append(phase)
                 site_i += 1
 #Generate Hamiltonian for a specific kpt.
 #------------------------------------------------------ 
             
             #find eigenvalues for each kpt
             eig_list.append(np.linalg.eigvalsh(H))
-            
+            #tolerance for checking if hermitian
+            if not (H - H.H <= np.ones(H.shape)*1E-12).all():
+                print "Matrix is not hermitian, something went wrong..."
+                exit()
 #        print eig_list
         eig_list = np.array(eig_list)
 #        print H == H.H
         self.eig = eig_list
         #print H == H.H
-        #print H == H.H
         return eig_list, k_points
+    
+    @staticmethod
+    def plot_eigen(eig_values):
+        from matplotlib import pyplot as plt
+        from matplotlib import rc_file
+        rc_file('/Users/cpashartis/bin/rcplots/paper_multi.rc')
+        
+        f = plt.figure()
+        ax = f.add_subplot(111)
+        x = np.linspace(0,1,eig.shape[0])
+        for i in range(eig.shape[1]):
+            ax.plot(x, eig[:,i])
+        labels = ['L', r'$\Gamma$', 'X', r'$\Gamma$']
+        plt.xticks([0, 1/3., 2/3., 1], labels)
+        lims = plt.ylim()
+        plt.vlines([1/3.,2/3.],lims[0],lims[1], color = 'k', linestyle = '--')
+        ax.set_title('Silicon Tight Binding')
+        ax.set_ylabel('Energy (eV)')
+        ax.set_ylim(-10, 7)
+        f.savefig('Silicon_TB.pdf', dpi = 1000 )
+        plt.close('all')
+        
              
         
 if __name__ == '__main__':
     
-    E_s = -7.2#0
-    E_p = 0 #7.2
-    V_ss = -8.13
-    V_sp = 0#5.88/4
-    V_xx = 0#3.17/4
-    V_xy = 0#7.51/4
+    E_s = 0
+    E_p = 7.2
+    V_ssig = -2.032
+    V_sp = 2.546 #np.sqrt(3)/4*5.8
+    V_ppSig = 4.5475
+    V_ppPi = -1.085
 
     a = LCAO('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/POSCAR.Si_16atom')
     #a.load_struct()  #'Si_1atom.cif'
-    eig, kpt = a.build_diamond_nn_H(a.diamond_g, a.k_points(), (E_p,V_ss,V_sp,V_xx, V_xy) )
-    print eig
-    f = plt.figure()
-    ax = f.add_subplot(111)
-    x = np.linspace(0,1,eig.shape[0])
-    for i in range(eig.shape[1]):
-        ax.plot(x, eig[:,i])
-#labels = ['L', r'$\Gamma$', 'X', r'$\Gamma$']
-#plt.xticks(bin_edges, labels)
-#a = plt.gca()
-#lims = a.get_ylim()
-#plt.vlines(bin_edges[1:-1],lims[0],lims[1], color = 'k', linestyle = '--')
-    ax.set_title('Silicon Tight Binding')
-    ax.set_ylabel('Energy (eV)')
-    #ax.set_ylim(-10, 15)
-    f.savefig('Silicon_TB.pdf', dpi = 1000 )
-    plt.close('all')
+    eig, kpt = a.build_diamond_nn_H(a.diamond_g, a.k_points(), (E_p,V_ssig,V_sp,V_ppSig, V_ppPi) )
