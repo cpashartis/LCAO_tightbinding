@@ -1,0 +1,4 @@
+#TightBinding Parameters Dictionary, spds* source Jancu et al. 1997
+#alloy lat	E_sa	E_sc	E_pa	E_pc	ssSigma	sapcSigma	scpaSigma	ppSigma	ppPi
+AlP	5.46	-5.3355	0.9573	3.3471	6.3392	-1.7403	2.6146	2.7804	4.0355	-1.3077
+GaAs	5.6532	-5.9819	-0.4028	3.5820	6.3853	-1.6187	2.4912	2.9382	4.4094	-1.4572
