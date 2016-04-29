@@ -12,6 +12,8 @@ Tight Binding LCAO approach
 import numpy as np
 import pymatgen as pm
 from sys import exit
+from re import findall
+
 class LCAO:
     
     def __init__(self,filename):
@@ -22,15 +24,10 @@ class LCAO:
         
         self.struct = pm.Structure.from_file(filename, primitive = False)   
         
-    #def _func_exp(self, d, k):
-        
     @staticmethod
     def diamond_g(d, k):
         """Diamond structure plane wave components, 
-        returns vector for all k points"""
-        #may be forgetting pi here
-        #make sure g is complex
-        
+        returns vector for all k points"""        
         return_array = \
              1/4.*np.array([np.exp(1.j*np.dot(d[0,:], k)) \
                 + np.exp(1.j*np.dot(d[1,:], k))\
@@ -76,8 +73,6 @@ class LCAO:
     def k_points(self, sym_pts = 0, coarse = 0): 
         
         if sym_pts == 0:
-#            sym_pts = np.array([[.5,.5,.5], [0,0,0], [1,0,0]], dtype = float)
-#            L,GAMMA,X,GAMMA
             sym_pts = np.array([[0.5, 0, 0],[0.0, 0.0, 0.0],
                                 [0.0, 0.5, 0.5], [1,1,1]],
                                 dtype = float)
@@ -99,9 +94,7 @@ class LCAO:
             kx,ky,kz = [np.linspace(start_pt[i], end_pt[i], coarse[ind-1]).reshape(coarse[ind-1],1) for i in range(3)]
             kpts.extend(np.concatenate((kx,ky,kz), axis = 1))
             start_pt = end_pt.copy()
-        #print kpts
-        #kpts = [[0.,0.,0.]]
-        return kpts #np.array(kpts)*2*np.pi#self.struct.lattice.a #assuming similar dimensional lattice
+        return kpts
        
     def find_neighbours(self):
         """Generate nearest neighbours from pymatgen code to prep for hamiltonian"""
@@ -131,7 +124,6 @@ class LCAO:
             nn_distance = min(dist_mat[np.nonzero(dist_mat)])
         except ValueError: #check if prim_struct has only one atom
             if len(prim_struct.sites) == 1 :
-                #nn_distance = prim_struct.lattice.a/
                 neighbors = 'fix'
             else:
                 print "I have no idea what to do duuuude"
@@ -140,24 +132,86 @@ class LCAO:
         neighbors = self.struct.get_all_neighbors(nn_distance+0.01) #0.01 to get all
                 
         return neighbors, prim_struct
-          
-#    def _off_diag_diamond(self, sym_fac):
+        
+    @staticmethod
+    def load_tb_coefs(atom, adj_atoms, bond_length = 1, bond_type = 'sp3',
+                      sub_type = 'orb'):
+                          
+        """Pull tight binding parameters from Parameters file. Only capable
+        of binary and sp3 alloys at the moment. It will average S and P E orbital
+        energies to accomodate changing values in meV
+        
+        ex. Ga surrounded by 3 As and 1 Bi then the E_s will be 3 parts GaAs
+        
+        --------
+        atom - atom name string
+        adj_atoms - list of adjacent atoms, it will check if single atom crystal
+        sub_type - can be 'orb' or 'bond'
+        
+        returns an array of orbital energies or bond energies in the format of 
+        files III-V_binaries for binaries or single_atom for single atom data"""
         
         
-    def build_diamond_nn_H(self, g, k_points, params , interactions = 4):#, int_function = 0):
+        if bond_type is not 'sp3':
+            print "cannot do this yet"
+            exit()
+        
+        if type(adj_atoms) is not list:
+            adj_atoms = [str(adj_atoms)]
+            
+        if adj_atoms.count(atom) == len(adj_atoms):
+            file_name = 'single_atom.dat'
+        else:
+            file_name = 'III-V_binaries.dat'
+        
+        if sub_type == 'orb':
+            E = np.zeros(2)
+            stop_cntr = 0
+            with open('Parameters/' + file_name, 'r') as tb_in:
+                for line in tb_in:
+                    #check for comments
+                    if line[0] =='#':
+                        continue
+                    line = line.split('\t')
+                    if atom in line[0]:
+                        if 'single' in file_name:
+                            return np.array([0,line[1]], dtype = float)
+                        else:
+                            #we have a match, find if cation or anion
+                            break_alloy = findall(r'[A-Z][a-z]*', line[0])
+                            cat_an_i = break_alloy.index(atom)
+                        if break_alloy[cat_an_i-1] in adj_atoms:
+                            E += np.array([line[3-cat_an_i], line[5-cat_an_i]],
+                                dtype = float) * float(line[1])**2
+                            stop_cntr +=1
+                        
+                        if stop_cntr >4 :
+                            #stop and return
+                            return E/(4.0*bond_length**2)
+                            
+        elif sub_type == 'bond':
+            with open('Parameters/'+file_name, 'r') as tb_in:
+                for line in tb_in:
+                    #check for comments
+                    if line[0] =='#':
+                        continue
+                    line = line.split('\t')
+                    if atom in line[0]:
+                        if 'single' in file_name:
+                            return np.array(line[2:], dtype = float), -1
+                        else:
+                            #we have a match, find if cation or anion
+                            break_alloy = findall(r'[A-Z][a-z]*', line[0])
+                            cat_an_i = break_alloy.index(atom)
+                        if break_alloy[cat_an_i-1] in adj_atoms:
+                            return np.array(line[6:], dtype = float), cat_an_i
+                            
+        
+    def build_diamond_nn_H_sp3(self, g, k_points, params , ):#, int_function = 0):
         """Assumes use of crystal structure
         
         The input must be dictioniaries of the atom in which the overlaps
         or energies are describing, ex.
-        
-        Note this only works if the structure given has the typical lattice
-        vectors (or factors of these vectors)
-        
-        0.5  0.0  0.5
-        0.0  0.5  0.5
-        0.5  0.5  0.0
-        
-        Currently assumes input of sublattice order.
         
         Args:
             params - (delta_E, V_ss, V_sp, V_xx, V_xy), is a tuple of the
@@ -166,39 +220,44 @@ class LCAO:
             dict_atom_tight - dictionary with element symbol as key and with 
                             delta_E, E_xx
                             
-        CAN MAKE FASTER BY GETTING RID OF G AND JUST BUILDING PLACEMENT
-                            
         """
-        #print params
-        delta_E, V_sSig, V_spSig, V_ppSig, V_ppPi = params
+        
+        interactions = 4
+        
+#        delta_E, V_sSig, V_spSig0, V_ppSig, V_ppPi = params
+#        V_spSig1 = V_spSig0
+#        E_s = 0
+#        E_p = delta_E
         neighbors, prim_struct = self.find_neighbours()
         eig_list = []
+        atom_tb_coefs = {}
+        alloy_tb_coefs = {}
         
         size = len(self.struct.sites) * interactions
         for kpt in k_points:
             #we want to build a (4xN)x(4xN) matrix
-            ################################################
-            #loop to find path of -1, +1s, by starting with one site and adding
-            #neighbors and keep repeating
-            #this could be fixed (somehow) by determining sublattices
-            #NNNNNNNNNEEEEEEEEEEDED STILL
-            ################################################################
             
             #loop through each site's neighbors
             site_i = 0
             H = np.matrix(np.zeros((size,size)), dtype = complex)
-            #cur_g = g(d,kpt)
-            dz_l = []
-            dy_l = []
-            dx_l = []
-            phase_l = []
+            
             for nearests in neighbors:
-                #sym_counter *=-1 #multiply by negative 1 for each new position
-                #format is list of [sites]
+
+                #find atom name and pull tb params from data
+                atom_name = str(self.struct.sites[site_i].specie.symbol)
+                neigh_name = [str(x[0].specie.symbol) for x in nearests]
+#NEEEFEEEEED A FUCKING SORT EASIER THING HERE LIKE SORT THEM FIRST
+                #sort for consistency, atom name first
+                temp = neigh_name
+                temp.append(atom_name)
+                temp.sort()
+                atom_key = ''.join(temp)
+                if atom_key not in atom_tb_coefs.keys():
+                    data = self.load_tb_coefs(atom_name, neigh_name, bond_type = 'sp3',
+                      sub_type = 'orb')
+                    atom_tb_coefs.update({atom_key:data})
+                E_s, E_p = atom_tb_coefs[atom_key]
                     
-                #swap if element is halfway through, i.e. next sublattice
-#                if len(self.struct.sites)/2 - 1 == site_i:
-#                    lat_fac = -1
 #------------------------------------------------------
 #Generate Hamiltonian for a specific kpt.
                 
@@ -218,15 +277,10 @@ class LCAO:
                     
                     nearest = nearest[0] #it was a tuple
                     d = nearest.coords - self.struct.sites[site_i].coords
-#                    neighb_coord = nearest.coords - self.struct.sites[i].coords
-#                    #get rid of lattice constant as the diamond k points are unitless
-#                    a0 = np.sqrt(2)* self.struct.lattice.a
-#                    d.append(neighb_coord/a0)
     #---------
     #build off diagonals
                     #first find if one of the neighbors is in the structure
-                    #check periodic
-                    #print nearest
+                    #check periodic\
                     site_off_i = -1
                     for i in self.struct.sites:
                         if nearest.is_periodic_image(i):
@@ -236,51 +290,60 @@ class LCAO:
                     if site_off_i == -1:
                         continue
                     
+    #---------
+    #pull existing tb coefficients
+                    neigh_name = str(nearest.specie.symbol)
+                    temp = [atom_name, neigh_name]
+                    temp.sort()
+                    alloy_name = ''.join(temp) #to keep permutations down
+                    if alloy_name not in alloy_tb_coefs.keys():
+                        data, cat_an = self.load_tb_coefs(atom_name, neigh_name,
+                                        bond_type = 'sp3',sub_type = 'bond')
+                        alloy_tb_coefs.update({alloy_name:(data, cat_an)})
+                        
+                    data, cat_an = alloy_tb_coefs[alloy_name]
+            
+            #####something iffy is going on here
+            #####
+            
+                    #this is required since we must account for anion s orbital
+                    if cat_an == 0: #then it is the cation
+                        V_sSig, V_spSig0, V_spSig1, V_ppSig, VppPi = data
+                    elif cat_an == -1 : #single atom case
+                        V_sSig, V_spSig0, V_ppSig, VppPi = data
+                        V_spSig1 = V_spSig0
+                    else: #it is 1
+                        #flip Sig order
+                        V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi = data
+                      
                     #now add components
-                    #ex s1, with s2, px2, py2, pz2
                     phase = np.exp(1.0j*np.dot(d, kpt))
                     dx = np.dot(d/np.linalg.norm(d),[1,0,0])
                     dy = np.dot(d/np.linalg.norm(d),[0,1,0])
                     dz = np.dot(d/np.linalg.norm(d),[0,0,1])
-                    #ss
-                    #s1 p_x2
-                    #s1 p_y2
-                    #s1 p_z2
-                    #px1 s2 -1 for opposite lobe
-                    #0
-                    #0
-                    #0
-                    #py1 s2 (-1)
-                    #0
-                    #0
-                    #0
-                    #pz1 s2 (-1)
-                    #0
-                    #0
-                    #0
+                    #ss | s1 p_x2  s1 p_y2 | s1 p_z2
+                    #px1 s2 -1 for diff direc | px1 px2 | px1 py2 | px1 pz2
+                    #py1 s2 (-1) | py1 px2 | py1 py2 | py1 pz2
+                    #pz1 s2 (-1) | pz1 px2 | pz1 py2 | pz1 pz2
+                    
+                    #VspSig0 is the s orbital (of the atom) to the neigh p
+                    #VspSig1 is the s orbital (of neigh) to atom p
                     H_off = np.matrix([
-    [V_sSig * phase, V_spSig * dx * phase,
-         V_spSig * dy * phase, V_spSig * dz * phase], 
-    [V_spSig *-1* dx * phase, (V_ppSig * dx**2 + V_ppPi *(1-dx**2))*phase,
+    [V_sSig * phase, V_spSig0 * dx * phase,
+         V_spSig0 * dy * phase, V_spSig0 * dz * phase], 
+    [V_spSig1 *-1* dx * phase, (V_ppSig * dx**2 + V_ppPi *(1-dx**2))*phase,
          dx*dy*(V_ppSig-V_ppPi)*phase, dx*dz*(V_ppSig-V_ppPi)*phase],
-    [V_spSig *-1* dy * phase, dy*dx*(V_ppSig-V_ppPi)*phase,
+    [V_spSig1 *-1* dy * phase, dy*dx*(V_ppSig-V_ppPi)*phase,
          (V_ppSig * dy**2 + V_ppPi *(1-dy**2))*phase,
         dy*dz*(V_ppSig-V_ppPi)*phase],
-    [V_spSig *-1* dz * phase, dz*dx*(V_ppSig-V_ppPi)*phase, 
+    [V_spSig1 *-1* dz * phase, dz*dx*(V_ppSig-V_ppPi)*phase, 
          dz*dy*(V_ppSig-V_ppPi)*phase,
         (V_ppSig * dz**2 + V_ppPi *(1-dz**2))*phase] ] )
-        
-#                    H_off[1,1] = 0.
-#                    H_off[2,2] = 0.
-#                    H_off[3,3] = 0.
                                  
                     H[interactions*site_i:interactions*(site_i+1),
             interactions*site_off_i:interactions*(site_off_i+1)] += H_off
-                    
-                    dz_l.append(dz)
-                    dy_l.append(dy)
-                    dx_l.append(dx)
-                    phase_l.append(phase)
+                
+    #---------
                 site_i += 1
 #Generate Hamiltonian for a specific kpt.
 #------------------------------------------------------ 
@@ -291,11 +354,9 @@ class LCAO:
             if not (H - H.H <= np.ones(H.shape)*1E-12).all():
                 print "Matrix is not hermitian, something went wrong..."
                 exit()
-#        print eig_list
         eig_list = np.array(eig_list)
-#        print H == H.H
         self.eig = eig_list
-        #print H == H.H
+        
         return eig_list, k_points
     
     @staticmethod
@@ -331,5 +392,5 @@ if __name__ == '__main__':
     V_ppPi = -1.085
 
     a = LCAO('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/POSCAR.Si_16atom')
-    #a.load_struct()  #'Si_1atom.cif'
-    eig, kpt = a.build_diamond_nn_H(a.diamond_g, a.k_points(), (E_p,V_ssig,V_sp,V_ppSig, V_ppPi) )
+    eig, kpt = a.build_diamond_nn_H_sp3(a.diamond_g, a.k_points(), (E_p,V_ssig,V_sp,V_ppSig, V_ppPi) )
+    LCAO.plot_eigen(eig)
