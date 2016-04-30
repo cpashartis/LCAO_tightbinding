@@ -182,13 +182,14 @@ class LCAO:
                             cat_an_i = break_alloy.index(atom)
                         if break_alloy[cat_an_i-1] in adj_atoms:
                             E += np.array([line[3-cat_an_i], line[5-cat_an_i]],
-                                dtype = float) * float(line[1])**2
+                                dtype = float)
                             stop_cntr +=1
                         
                         if stop_cntr >4 :
-                            #stop and return
-                            return E/(4.0*bond_length**2)
+                            #stop and return the average orbital energy
+                            return E/(4.0) #bondlength?
                             
+                return E/(stop_cntr)
         elif sub_type == 'bond':
             with open('Parameters/'+file_name, 'r') as tb_in:
                 for line in tb_in:
@@ -197,14 +198,17 @@ class LCAO:
                         continue
                     line = line.split('\t')
                     if atom in line[0]:
+                        #return bond length scaled energies
                         if 'single' in file_name:
-                            return np.array(line[2:], dtype = float), -1
+                            return np.array(line[2:], dtype = float)\
+                            *bond_length**2, line[0]
                         else:
                             #we have a match, find if cation or anion
                             break_alloy = findall(r'[A-Z][a-z]*', line[0])
                             cat_an_i = break_alloy.index(atom)
                         if break_alloy[cat_an_i-1] in adj_atoms:
-                            return np.array(line[6:], dtype = float), cat_an_i
+                            return np.array(line[6:], dtype = float)\
+                            *bond_length**2, line[0]
                             
         
     def build_diamond_nn_H_sp3(self, g, k_points, params , ):#, int_function = 0):
@@ -246,15 +250,22 @@ class LCAO:
                 #find atom name and pull tb params from data
                 atom_name = str(self.struct.sites[site_i].specie.symbol)
                 neigh_name = [str(x[0].specie.symbol) for x in nearests]
-#NEEEFEEEEED A FUCKING SORT EASIER THING HERE LIKE SORT THEM FIRST
                 #sort for consistency, atom name first
-                temp = neigh_name
+                temp = neigh_name[:]
                 temp.append(atom_name)
                 temp.sort()
+                temp2 = []
+                #reducing number of permutations, GaAsAsAsAs is AsGa
+                for ele in temp:
+                    if ele not in temp2:
+                        temp2.append(ele)
+                temp = temp2[:]
                 atom_key = ''.join(temp)
+                #remove duplicates from the atom_key
+                atom_key = atom_key.strip()
                 if atom_key not in atom_tb_coefs.keys():
-                    data = self.load_tb_coefs(atom_name, neigh_name, bond_type = 'sp3',
-                      sub_type = 'orb')
+                    data = self.load_tb_coefs(atom_name, neigh_name,
+                                bond_type = 'sp3', sub_type = 'orb')
                     atom_tb_coefs.update({atom_key:data})
                 E_s, E_p = atom_tb_coefs[atom_key]
                     
@@ -297,24 +308,30 @@ class LCAO:
                     temp.sort()
                     alloy_name = ''.join(temp) #to keep permutations down
                     if alloy_name not in alloy_tb_coefs.keys():
-                        data, cat_an = self.load_tb_coefs(atom_name, neigh_name,
+                        data, act_key = self.load_tb_coefs(atom_name, neigh_name,
                                         bond_type = 'sp3',sub_type = 'bond')
-                        alloy_tb_coefs.update({alloy_name:(data, cat_an)})
-                        
-                    data, cat_an = alloy_tb_coefs[alloy_name]
+                        alloy_tb_coefs.update({alloy_name:(data, act_key)})
+                       
+                    #load data
+                    data,ord_alloy_name = alloy_tb_coefs[alloy_name]
+                    break_alloy = findall(r'[A-Z][a-z]*', ord_alloy_name)
+                    if len(break_alloy) == 1: 
+                        cat_an = -1
+                    else:
+                        cat_an = break_alloy.index(atom_name) #0 for cation
             
             #####something iffy is going on here
             #####
             
                     #this is required since we must account for anion s orbital
                     if cat_an == 0: #then it is the cation
-                        V_sSig, V_spSig0, V_spSig1, V_ppSig, VppPi = data
+                        V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi = data
                     elif cat_an == -1 : #single atom case
                         V_sSig, V_spSig0, V_ppSig, VppPi = data
                         V_spSig1 = V_spSig0
                     else: #it is 1
                         #flip Sig order
-                        V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi = data
+                        V_sSig, V_spSig0, V_spSig1, V_ppSig, VppPi = data
                       
                     #now add components
                     phase = np.exp(1.0j*np.dot(d, kpt))
@@ -391,6 +408,6 @@ if __name__ == '__main__':
     V_ppSig = 4.5475
     V_ppPi = -1.085
 
-    a = LCAO('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/POSCAR.Si_16atom')
+    a = LCAO('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/GaAs_16atom.cif')
     eig, kpt = a.build_diamond_nn_H_sp3(a.diamond_g, a.k_points(), (E_p,V_ssig,V_sp,V_ppSig, V_ppPi) )
     LCAO.plot_eigen(eig)
