@@ -8,9 +8,9 @@ data_VESTA_phase_1
 
 
 _pd_phase_name                         'Si2'
-_cell_length_a                         7.73394
-_cell_length_b                         7.73394
-_cell_length_c                         7.73394
+_cell_length_a                         7.99000
+_cell_length_b                         7.99000
+_cell_length_c                         7.99000
 _cell_angle_alpha                      60.00000
 _cell_angle_beta                       60.00000
 _cell_angle_gamma                      60.00000

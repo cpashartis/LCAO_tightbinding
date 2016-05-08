@@ -1,0 +1,6 @@
+#TightBinding Parameters Dictionary, sp3s* source E.P. O'Reilly et al. 2002
+#lattice constants / bond length not given, guessing here
+#saled InAs in ref to GaAs at 0.25eV above
+#alloy lat	E_sa	E_sc	E_pa	E_pc	E_s*a	E_s*c	ssSigma	sapcSigma	scpaSigma	ppSigma	ppPi	s*apcSigma s*cpaSigma
+GaAs	2.44652176	-8.6336	-2.9474	1.0414	3.6686	7.0914	6.5386	-1.6572	2.2542	2.3339	2.9811	-0.7576	1.9924	1.6610
+InAs	2.62332085	-9.0381	-2.2219	1.4099	4.2201	7.9099	7.2401	-1.1202	1.5644	2.6051	2.9446	-0.4074	1.7102	1.9430

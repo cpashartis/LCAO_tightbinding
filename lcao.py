@@ -13,6 +13,8 @@ import numpy as np
 import pymatgen as pm
 from sys import exit
 from re import findall
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import eigsh
 
 class LCAO:
     
@@ -70,15 +72,12 @@ class LCAO:
        
         return H
        
-    def k_points(self, sym_pts = 0, coarse = 0): 
-        
-        if sym_pts == 0:
-            sym_pts = np.array([[0.5, 0, 0],[0.0, 0.0, 0.0],
-                                [0.0, 0.5, 0.5], [1,1,1]],
-                                dtype = float)
-            sym_pts = np.matrix(sym_pts)*np.matrix(self.struct.reciprocal_lattice.matrix)
+    def k_points(self, sym_pts, coarse = 0, struct_t = 'diamond'): 
+                    
+        #assuming array
+        sym_pts = np.matrix(sym_pts)*np.matrix(self.struct.reciprocal_lattice.matrix)
         if coarse == 0 :
-            coarse = np.array([100,100,100])
+            coarse = np.array([50,50,50])
             
         if len(coarse) != len(sym_pts) - 1:
             raise IndexError("The length of the coarse \
@@ -135,7 +134,7 @@ class LCAO:
         
     @staticmethod
     def load_tb_coefs(atom, adj_atoms, bond_length = 1, bond_type = 'sp3',
-                      sub_type = 'orb'):
+                      sub_type = 'orb', dist_scale = '2'):
                           
         """Pull tight binding parameters from Parameters file. Only capable
         of binary and sp3 alloys at the moment. It will average S and P E orbital
@@ -147,12 +146,15 @@ class LCAO:
         atom - atom name string
         adj_atoms - list of adjacent atoms, it will check if single atom crystal
         sub_type - can be 'orb' or 'bond'
+        bond_type - sp3, or sp3s (last s is excited)
+        dist_scale - 2 for the square law, may implement from file later
         
         returns an array of orbital energies or bond energies in the format of 
-        files III-V_binaries for binaries or single_atom for single atom data"""
+        files III-V_binaries for binaries or single_atom for single atom data
+        """
         
         
-        if bond_type is not 'sp3':
+        if bond_type not in ['sp3','sp3s']:
             print "cannot do this yet"
             exit()
         
@@ -162,56 +164,74 @@ class LCAO:
         if adj_atoms.count(atom) == len(adj_atoms):
             file_name = 'single_atom.dat'
         else:
-            file_name = 'III-V_binaries.dat'
-        
+            if bond_type == 'sp3':
+                file_name = 'III-V_binaries_sp3.dat'
+                num_orb = 2
+            elif bond_type == 'sp3s':
+                file_name = 'III-V_binaries_sp3s*.dat'
+                num_orb = 3 
+        #-----------------
+        #DEV note, handles sp3s and sp3 in the same fashion, just accounts
+        #for two extra indices in one case
+        #-----------------
         if sub_type == 'orb':
-            E = np.zeros(2)
+            E = np.zeros(2*num_orb)
             stop_cntr = 0
             with open('Parameters/' + file_name, 'r') as tb_in:
                 for line in tb_in:
                     #check for comments
                     if line[0] =='#':
                         continue
-                    line = line.split('\t')
+                    line = line.strip()
+                    line = line.split()
                     if atom in line[0]:
                         if 'single' in file_name:
-                            return np.array([0,line[1]], dtype = float)
+                            return np.array([0,line[1]], dtype = float), line[0]
                         else:
                             #we have a match, find if cation or anion
                             break_alloy = findall(r'[A-Z][a-z]*', line[0])
                             cat_an_i = break_alloy.index(atom)
+                        #check if other atom in neigh
                         if break_alloy[cat_an_i-1] in adj_atoms:
-                            E += np.array([line[3-cat_an_i], line[5-cat_an_i]],
+                            E += np.array(line[2: 2+2*num_orb],
                                 dtype = float)
-                            stop_cntr +=1
+                                
+                            E *= adj_atoms.count(break_alloy[cat_an_i-1])
+                            stop_cntr += adj_atoms.count(break_alloy[cat_an_i-1])
                         
-                        if stop_cntr >4 :
+                        if stop_cntr == 4 :
                             #stop and return the average orbital energy
-                            return E/(4.0) #bondlength?
+                            return E/(4.0), line[0]
                             
-                return E/(stop_cntr)
+                print "well something went wrong and I couldn't find the data"
+                
         elif sub_type == 'bond':
             with open('Parameters/'+file_name, 'r') as tb_in:
                 for line in tb_in:
                     #check for comments
                     if line[0] =='#':
                         continue
-                    line = line.split('\t')
+                    line = line.strip()
+                    line = line.split()
                     if atom in line[0]:
-                        #return bond length scaled energies
+                        #no bond scaling here
                         if 'single' in file_name:
-                            return np.array(line[2:], dtype = float)\
-                            *bond_length**2, line[0]
+                            return np.array(line[2:], dtype = float), line[0]
                         else:
                             #we have a match, find if cation or anion
                             break_alloy = findall(r'[A-Z][a-z]*', line[0])
                             cat_an_i = break_alloy.index(atom)
+                        #check if other atom in niegh
                         if break_alloy[cat_an_i-1] in adj_atoms:
-                            return np.array(line[6:], dtype = float)\
-                            *bond_length**2, line[0]
+                            if dist_scale == '2': 
+                                return np.array(line[num_orb*2+2:], dtype = float)\
+                                *((float(line[1])/bond_length)**2), line[0]
+                            else:
+                                print "cannot do bond scaling other than 2 for now"
+                                exit()
                             
         
-    def build_diamond_nn_H_sp3(self, g, k_points, params , ):#, int_function = 0):
+    def build_diamond_nn_H(self, g, k_points, H_type = 'sp3'):#, int_function = 0):
         """Assumes use of crystal structure
         
         The input must be dictioniaries of the atom in which the overlaps
@@ -223,17 +243,19 @@ class LCAO:
                     see method diamond_init
             dict_atom_tight - dictionary with element symbol as key and with 
                             delta_E, E_xx
+            H_type  - sp3, sp3s, (maybe sp3d5s later)
                             
         """
         
-        interactions = 4
-        
-#        delta_E, V_sSig, V_spSig0, V_ppSig, V_ppPi = params
-#        V_spSig1 = V_spSig0
-#        E_s = 0
-#        E_p = delta_E
+        if H_type == 'sp3':
+            interactions = 4
+        elif H_type == 'sp3s':
+            interactions = 5
+
         neighbors, prim_struct = self.find_neighbours()
         eig_list = []
+        eig_val_l = []
+        eig_vec_l = []
         atom_tb_coefs = {}
         alloy_tb_coefs = {}
         
@@ -250,7 +272,8 @@ class LCAO:
                 #find atom name and pull tb params from data
                 atom_name = str(self.struct.sites[site_i].specie.symbol)
                 neigh_name = [str(x[0].specie.symbol) for x in nearests]
-                #sort for consistency, atom name first
+                #atom name first, followed by neighbor
+                temp = [atom_name]
                 temp = neigh_name[:]
                 temp.append(atom_name)
                 temp.sort()
@@ -264,11 +287,22 @@ class LCAO:
                 #remove duplicates from the atom_key
                 atom_key = atom_key.strip()
                 if atom_key not in atom_tb_coefs.keys():
-                    data = self.load_tb_coefs(atom_name, neigh_name,
-                                bond_type = 'sp3', sub_type = 'orb')
-                    atom_tb_coefs.update({atom_key:data})
-                E_s, E_p = atom_tb_coefs[atom_key]
+                    data,place = self.load_tb_coefs(atom_name, neigh_name,
+                                bond_type = H_type, sub_type = 'orb')
+                    atom_tb_coefs.update({atom_key:(data,place)})
                     
+                data, place = atom_tb_coefs[atom_key]
+                #ord_alloy_name is one of the names of the bonds, meant for placeholder
+                #of anion or cation
+                #find if the atom is anion or cation based on position in string
+                break_alloy = findall(r'[A-Z][a-z]*', place)
+                if len(break_alloy) == 1: 
+                    cat_an = -1
+                    E_orb = data
+                else:
+                    cat_an = break_alloy.index(atom_name) #0 for cation
+                    E_orb = np.array([data[j] for j in range(1-cat_an,\
+                        len(data),2)])
 #------------------------------------------------------
 #Generate Hamiltonian for a specific kpt.
                 
@@ -276,16 +310,18 @@ class LCAO:
                 
     #---------
     #first build diagonal i.e. s1,px1, py1, pz1  s1, px1, py1, pz1
-                H_diag = np.matrix([ [E_s, 0, 0, 0],
-                                     [0, E_p, 0, 0],
-                                     [0, 0, E_p, 0],
-                                     [0, 0, 0 , E_p] ])
+                if H_type == 'sp3':
+                    H_diag = np.diag([E_orb[0], E_orb[1],E_orb[1],E_orb[1]])
+                elif H_type == 'sp3s':
+                    H_diag = np.diag([E_orb[0], E_orb[1],E_orb[1],E_orb[1],\
+                            E_orb[2]])
+                            
                 H[interactions*site_i:interactions*(site_i+1),
-                  interactions*site_i:interactions*(site_i+1)]= H_diag     
-  
-                #doesn't work DUE TO PICKING DIFFERENT ORDER OF R FOR G .... >.<
+                  interactions*site_i:interactions*(site_i+1)]= H_diag   
+                  
                 for nearest in nearests:
                     
+                    bond_length = nearest[1]
                     nearest = nearest[0] #it was a tuple
                     d = nearest.coords - self.struct.sites[site_i].coords
     #---------
@@ -309,35 +345,44 @@ class LCAO:
                     alloy_name = ''.join(temp) #to keep permutations down
                     if alloy_name not in alloy_tb_coefs.keys():
                         data, act_key = self.load_tb_coefs(atom_name, neigh_name,
-                                        bond_type = 'sp3',sub_type = 'bond')
+                                        bond_type = H_type,sub_type = 'bond',
+                                        bond_length = bond_length )
                         alloy_tb_coefs.update({alloy_name:(data, act_key)})
                        
                     #load data
                     data,ord_alloy_name = alloy_tb_coefs[alloy_name]
-                    break_alloy = findall(r'[A-Z][a-z]*', ord_alloy_name)
-                    if len(break_alloy) == 1: 
-                        cat_an = -1
-                    else:
-                        cat_an = break_alloy.index(atom_name) #0 for cation
-            
-            #####something iffy is going on here
-            #####
-            
-                    #this is required since we must account for anion s orbital
-                    if cat_an == 0: #then it is the cation
-                        V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi = data
-                    elif cat_an == -1 : #single atom case
+                    
+                    
+                    #unpack data
+                    #sepSig is excited s with p sigma bond
+                    #cation case assume
+                    #cat_an carried from outside loop
+                    if cat_an == -1 :
                         V_sSig, V_spSig0, V_ppSig, VppPi = data
                         V_spSig1 = V_spSig0
-                    else: #it is 1
-                        #flip Sig order
-                        V_sSig, V_spSig0, V_spSig1, V_ppSig, VppPi = data
+                    else: #binary
+                        if H_type == 'sp3':
+                            V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi = data
+                        elif H_type == 'sp3s':
+                            V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi, V_sepSig1,\
+                                V_sepSig0 = data
+                            
+                    #this is required since we must account for anion s orbital
+                        if cat_an == 1: #it is the anion, so reverse order
+                            #flip Sig order
+                            temp = V_spSig1
+                            V_spSig1 = V_spSig0
+                            V_spSig0 = temp
+                            if H_type == 'sp3s':
+                                temp = V_sepSig1
+                                V_sepSig1 = V_sepSig0
+                                V_sepSig0 = temp
                       
                     #now add components
                     phase = np.exp(1.0j*np.dot(d, kpt))
-                    dx = np.dot(d/np.linalg.norm(d),[1,0,0])
-                    dy = np.dot(d/np.linalg.norm(d),[0,1,0])
-                    dz = np.dot(d/np.linalg.norm(d),[0,0,1])
+                    l = np.dot(d/np.linalg.norm(d),[1,0,0])
+                    m = np.dot(d/np.linalg.norm(d),[0,1,0])
+                    n = np.dot(d/np.linalg.norm(d),[0,0,1])
                     #ss | s1 p_x2  s1 p_y2 | s1 p_z2
                     #px1 s2 -1 for diff direc | px1 px2 | px1 py2 | px1 pz2
                     #py1 s2 (-1) | py1 px2 | py1 py2 | py1 pz2
@@ -346,17 +391,32 @@ class LCAO:
                     #VspSig0 is the s orbital (of the atom) to the neigh p
                     #VspSig1 is the s orbital (of neigh) to atom p
                     H_off = np.matrix([
-    [V_sSig * phase, V_spSig0 * dx * phase,
-         V_spSig0 * dy * phase, V_spSig0 * dz * phase], 
-    [V_spSig1 *-1* dx * phase, (V_ppSig * dx**2 + V_ppPi *(1-dx**2))*phase,
-         dx*dy*(V_ppSig-V_ppPi)*phase, dx*dz*(V_ppSig-V_ppPi)*phase],
-    [V_spSig1 *-1* dy * phase, dy*dx*(V_ppSig-V_ppPi)*phase,
-         (V_ppSig * dy**2 + V_ppPi *(1-dy**2))*phase,
-        dy*dz*(V_ppSig-V_ppPi)*phase],
-    [V_spSig1 *-1* dz * phase, dz*dx*(V_ppSig-V_ppPi)*phase, 
-         dz*dy*(V_ppSig-V_ppPi)*phase,
-        (V_ppSig * dz**2 + V_ppPi *(1-dz**2))*phase] ] )
+    [V_sSig * phase, V_spSig0 * l * phase,
+         V_spSig0 * m * phase, V_spSig0 * n * phase], 
+    [V_spSig1 *-1* l * phase, (V_ppSig * l**2 + V_ppPi *(1-l**2))*phase,
+         l*m*(V_ppSig-V_ppPi)*phase, l*n*(V_ppSig-V_ppPi)*phase],
+    [V_spSig1 *-1* m * phase, m*l*(V_ppSig-V_ppPi)*phase,
+         (V_ppSig * m**2 + V_ppPi *(1-m**2))*phase,
+        m*n*(V_ppSig-V_ppPi)*phase],
+    [V_spSig1 *-1* n * phase, n*l*(V_ppSig-V_ppPi)*phase, 
+         n*m*(V_ppSig-V_ppPi)*phase,
+        (V_ppSig * n**2 + V_ppPi *(1-n**2))*phase] ] )
                                  
+                    #stack with sp3s if sp3s
+                    #note the sp3s type binding doesnt include s* s* int.
+                    #only p and s*, so 3 more interactions
+                    if H_type == 'sp3s':
+                        H_off = np.hstack((H_off, np.zeros((4,1)) ))
+                        H_off = np.vstack((H_off, np.zeros((1,5)) ))
+                        #this is the first row from H_off just for s* now
+                        H_off[-1,1:-1] = np.matrix([\
+            V_sepSig0 * l * phase,V_sepSig0 * m * phase, V_sepSig0 * n * phase])
+                        #like first column from H_off
+                        H_off[1:-1,-1] = np.matrix([
+                        [V_sepSig1 *-1* l * phase],
+                        [V_sepSig1 *-1* m * phase],
+                        [V_sepSig1 *-1* n * phase]])
+                        
                     H[interactions*site_i:interactions*(site_i+1),
             interactions*site_off_i:interactions*(site_off_i+1)] += H_off
                 
@@ -365,14 +425,21 @@ class LCAO:
 #Generate Hamiltonian for a specific kpt.
 #------------------------------------------------------ 
             
-            #find eigenvalues for each kpt
-            eig_list.append(np.linalg.eigvalsh(H))
             #tolerance for checking if hermitian
             if not (H - H.H <= np.ones(H.shape)*1E-12).all():
                 print "Matrix is not hermitian, something went wrong..."
                 exit()
+                
+            #find eigenvalues for each kpt
+            H_sp = csc_matrix(H)
+            eig_list.append(np.linalg.eigvalsh(H))
+            temp = eigsh(H_sp)
+            eig_val_l.append(temp[0])
+            eig_vec_l.append(temp[0])
+            
+            
+        eig_val_l = np.array(eig_val_l)
         eig_list = np.array(eig_list)
-        self.eig = eig_list
         
         return eig_list, k_points
     
@@ -389,11 +456,11 @@ class LCAO:
             ax.plot(x, eig[:,i])
         labels = ['L', r'$\Gamma$', 'X', r'$\Gamma$']
         plt.xticks([0, 1/3., 2/3., 1], labels)
+        #ax.set_ylim(-10, 4)
         lims = plt.ylim()
         plt.vlines([1/3.,2/3.],lims[0],lims[1], color = 'k', linestyle = '--')
         ax.set_title('Silicon Tight Binding')
         ax.set_ylabel('Energy (eV)')
-        ax.set_ylim(-10, 7)
         f.savefig('Silicon_TB.pdf', dpi = 1000 )
         plt.close('all')
         
@@ -408,6 +475,13 @@ if __name__ == '__main__':
     V_ppSig = 4.5475
     V_ppPi = -1.085
 
-    a = LCAO('/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/GaAs_16atom.cif')
-    eig, kpt = a.build_diamond_nn_H_sp3(a.diamond_g, a.k_points(), (E_p,V_ssig,V_sp,V_ppSig, V_ppPi) )
+    file_name = '/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/GaAs_2atom.cif'
+    struct_t = "diamond"                               
+    #zinc-blende / diamond
+    sym_pts = np.array([[0.5, 0.5,0.5],[0.0, 0.0, 0.0],
+                        [0.5, 0.0, 0.5], [1,1,1]],
+                                    dtype = float)
+    a = LCAO(file_name)
+    eig, kpt = a.build_diamond_nn_H(a.diamond_g, a.k_points(\
+        sym_pts = sym_pts), H_type = 'sp3s')
     LCAO.plot_eigen(eig)
