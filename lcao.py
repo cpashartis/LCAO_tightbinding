@@ -18,13 +18,13 @@ from scipy.sparse.linalg import eigsh
 
 class LCAO:
     
-    def __init__(self,filename):
+    def __init__(self, filename):
         
         """Method for determining the structure of the file being input,
         currently limited to crystal / wigner - seitz structures. Import the
         cif file here for use of atomic structures"""
         
-        self.struct = pm.Structure.from_file(filename, primitive = False)   
+        self.struct = pm.Structure.from_file(filename, primitive=False)   
         
     @staticmethod
     def diamond_g(d, k):
@@ -77,7 +77,7 @@ class LCAO:
         #assuming array
         sym_pts = np.matrix(sym_pts)*np.matrix(self.struct.reciprocal_lattice.matrix)
         if coarse == 0 :
-            coarse = np.array([50,50,50])
+            coarse = np.array([50,50,25,25])
             
         if len(coarse) != len(sym_pts) - 1:
             raise IndexError("The length of the coarse \
@@ -134,7 +134,7 @@ class LCAO:
         
     @staticmethod
     def load_tb_coefs(atom, adj_atoms, bond_length = 1, bond_type = 'sp3',
-                      sub_type = 'orb', dist_scale = '2'):
+                      sub_type = 'orb', dist_scale = '2', **kwargs):
                           
         """Pull tight binding parameters from Parameters file. Only capable
         of binary and sp3 alloys at the moment. It will average S and P E orbital
@@ -153,7 +153,7 @@ class LCAO:
         files III-V_binaries for binaries or single_atom for single atom data
         """
         
-        
+        file_name = ''
         if bond_type not in ['sp3','sp3s']:
             print "cannot do this yet"
             exit()
@@ -164,12 +164,23 @@ class LCAO:
         if adj_atoms.count(atom) == len(adj_atoms):
             file_name = 'single_atom.dat'
         else:
-            if bond_type == 'sp3':
-                file_name = 'III-V_binaries_sp3.dat'
+            #get filename from keywargs
+            for key,arg in kwargs.iteritems():
+                if key == 'file_name':
+                    file_name = arg
+                    
+            if bond_type == 'sp3':                    
+                if file_name == '':
+                    file_name = 'III-V_binaries_sp3.dat'
+                    
                 num_orb = 2
             elif bond_type == 'sp3s':
-                file_name = 'III-V_binaries_sp3s*.dat'
+                if file_name == '':
+                    file_name = 'III-V_binaries_sp3s*.dat'
+                    
                 num_orb = 3 
+                
+        print "Using data from %s" %(file_name), kwargs
         #-----------------
         #DEV note, handles sp3s and sp3 in the same fashion, just accounts
         #for two extra indices in one case
@@ -196,6 +207,7 @@ class LCAO:
                             E += np.array(line[2: 2+2*num_orb],
                                 dtype = float)
                                 
+                            #add the number of times it has the same neighbor
                             E *= adj_atoms.count(break_alloy[cat_an_i-1])
                             stop_cntr += adj_atoms.count(break_alloy[cat_an_i-1])
                         
@@ -231,7 +243,7 @@ class LCAO:
                                 exit()
                             
         
-    def build_diamond_nn_H(self, g, k_points, H_type = 'sp3'):#, int_function = 0):
+    def build_diamond_nn_H(self, g, k_points, H_type = 'sp3', **kwargs):#, int_function = 0):
         """Assumes use of crystal structure
         
         The input must be dictioniaries of the atom in which the overlaps
@@ -288,7 +300,7 @@ class LCAO:
                 atom_key = atom_key.strip()
                 if atom_key not in atom_tb_coefs.keys():
                     data,place = self.load_tb_coefs(atom_name, neigh_name,
-                                bond_type = H_type, sub_type = 'orb')
+                                bond_type = H_type, sub_type = 'orb', **kwargs)
                     atom_tb_coefs.update({atom_key:(data,place)})
                     
                 data, place = atom_tb_coefs[atom_key]
@@ -346,7 +358,7 @@ class LCAO:
                     if alloy_name not in alloy_tb_coefs.keys():
                         data, act_key = self.load_tb_coefs(atom_name, neigh_name,
                                         bond_type = H_type,sub_type = 'bond',
-                                        bond_length = bond_length )
+                                        bond_length = bond_length, **kwargs )
                         alloy_tb_coefs.update({alloy_name:(data, act_key)})
                        
                     #load data
@@ -445,6 +457,8 @@ class LCAO:
     
     @staticmethod
     def plot_eigen(eig_values):
+        """Needs to be fixed for genericnouss"""
+        
         from matplotlib import pyplot as plt
         from matplotlib import rc_file
         rc_file('/Users/cpashartis/bin/rcplots/paper_multi.rc')
@@ -454,14 +468,14 @@ class LCAO:
         x = np.linspace(0,1,eig.shape[0])
         for i in range(eig.shape[1]):
             ax.plot(x, eig[:,i])
-        labels = ['L', r'$\Gamma$', 'X', r'$\Gamma$']
-        plt.xticks([0, 1/3., 2/3., 1], labels)
-        #ax.set_ylim(-10, 4)
+        labels = ['L', r'$\Gamma$', 'X', 'K', r'$\Gamma$']
+        #fix for consistancy
+        plt.xticks([0, 1/3., 2/3.,5/6., 1], labels)
+        #ax.set_ylim(-1, 6)
         lims = plt.ylim()
-        plt.vlines([1/3.,2/3.],lims[0],lims[1], color = 'k', linestyle = '--')
-        ax.set_title('Silicon Tight Binding')
+        plt.vlines([1/3.,2/3.,5/6.],lims[0],lims[1], color = 'k', linestyle = '--')
         ax.set_ylabel('Energy (eV)')
-        f.savefig('Silicon_TB.pdf', dpi = 1000 )
+        f.savefig('band_dispersion.pdf', dpi = 1000 )
         plt.close('all')
         
              
@@ -475,13 +489,13 @@ if __name__ == '__main__':
     V_ppSig = 4.5475
     V_ppPi = -1.085
 
-    file_name = '/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/GaAs_2atom.cif'
+    file_name = '/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/GaAs_2atom_wann.cif'
     struct_t = "diamond"                               
     #zinc-blende / diamond
     sym_pts = np.array([[0.5, 0.5,0.5],[0.0, 0.0, 0.0],
-                        [0.5, 0.0, 0.5], [1,1,1]],
+                        [0.5, 0.0, 0.5], [5/8.,1/4.,5/8.], [0,0,0]],
                                     dtype = float)
     a = LCAO(file_name)
     eig, kpt = a.build_diamond_nn_H(a.diamond_g, a.k_points(\
-        sym_pts = sym_pts), H_type = 'sp3s')
+        sym_pts = sym_pts), H_type = 'sp3s')#, file_name = 'III-V_wannier_sp3.dat')
     LCAO.plot_eigen(eig)
