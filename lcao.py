@@ -9,6 +9,7 @@ This code was written by Christopher Pashartis, cpashartis@gmail.com
 Tight Binding LCAO approach
 """
 
+#reorder to include built in then downloadable
 import numpy as np
 import pymatgen as pm
 from sys import exit
@@ -16,10 +17,10 @@ from re import findall
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import eigsh
 
-class LCAO:
+
+class LCAO(object):
     
     def __init__(self, filename):
-        
         """Method for determining the structure of the file being input,
         currently limited to crystal / wigner - seitz structures. Import the
         cif file here for use of atomic structures"""
@@ -45,7 +46,6 @@ class LCAO:
        
     @staticmethod
     def diamond_nn_H(g, (delta_E, V_ss, V_sp, V_xx, V_xy), sym_fac ):
-        
         """Diamond tight binding interaction energy term for nearest neighbour
         interactions of s and p type orbitals 4x4 matrix from Peter Young
         semiconductor physics. Where nearest neighbours are required for each
@@ -86,11 +86,15 @@ class LCAO:
         sym_pts = np.array(sym_pts) #convert back for np useage
         start_pt = sym_pts[0,:]
         kpts = []
+        use_endpt = False
         #generate grid
         for ind in range(1,sym_pts.shape[0]):
             end_pt = sym_pts[ind,:]
+            if ind == sym_pts.shape[0]-1:
+                use_endpt = True
             #double counts endpts
-            kx,ky,kz = [np.linspace(start_pt[i], end_pt[i], coarse[ind-1]).reshape(coarse[ind-1],1) for i in range(3)]
+            kx,ky,kz = [np.linspace(start_pt[i], end_pt[i], coarse[ind-1],
+                endpoint = use_endpt).reshape(coarse[ind-1],1) for i in range(3)]
             kpts.extend(np.concatenate((kx,ky,kz), axis = 1))
             start_pt = end_pt.copy()
         return kpts
@@ -153,7 +157,6 @@ class LCAO:
         files III-V_binaries for binaries or single_atom for single atom data
         """
         
-        file_name = ''
         if bond_type not in ['sp3','sp3s']:
             print "cannot do this yet"
             exit()
@@ -161,24 +164,19 @@ class LCAO:
         if type(adj_atoms) is not list:
             adj_atoms = [str(adj_atoms)]
             
+        
         if adj_atoms.count(atom) == len(adj_atoms):
             file_name = 'single_atom.dat'
         else:
-            #get filename from keywargs
-            for key,arg in kwargs.iteritems():
-                if key == 'file_name':
-                    file_name = arg
-                    
             if bond_type == 'sp3':                    
-                if file_name == '':
-                    file_name = 'III-V_binaries_sp3.dat'
-                    
+                file_name = 'III-V_binaries_sp3.dat'
                 num_orb = 2
             elif bond_type == 'sp3s':
-                if file_name == '':
-                    file_name = 'III-V_binaries_sp3s*.dat'
-                    
+                file_name = 'III-V_binaries_sp3s*.dat'
                 num_orb = 3 
+        #reassign file_name
+        if 'file_name' in kwargs.keys():
+            file_name = kwargs['file_name']
                 
         print "Using data from %s" %(file_name), kwargs
         #-----------------
@@ -243,18 +241,14 @@ class LCAO:
                                 exit()
                             
         
-    def build_diamond_nn_H(self, g, k_points, H_type = 'sp3', **kwargs):#, int_function = 0):
+    def build_diamond_nn_H(self, k_points, H_type = 'sp3', **kwargs):#, int_function = 0):
         """Assumes use of crystal structure
         
         The input must be dictioniaries of the atom in which the overlaps
         or energies are describing, ex.
         
         Args:
-            params - (delta_E, V_ss, V_sp, V_xx, V_xy), is a tuple of the
-                    tightbinding coefficients, if only sigma and pi bonds known
-                    see method diamond_init
-            dict_atom_tight - dictionary with element symbol as key and with 
-                            delta_E, E_xx
+            k       - list of k_points to use, not reduced, but scaled to BZ
             H_type  - sp3, sp3s, (maybe sp3d5s later)
                             
         """
@@ -370,13 +364,13 @@ class LCAO:
                     #cation case assume
                     #cat_an carried from outside loop
                     if cat_an == -1 :
-                        V_sSig, V_spSig0, V_ppSig, VppPi = data
+                        V_sSig, V_spSig0, V_ppSig, V_ppPi = data
                         V_spSig1 = V_spSig0
                     else: #binary
                         if H_type == 'sp3':
-                            V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi = data
+                            V_sSig, V_spSig1, V_spSig0, V_ppSig, V_ppPi = data
                         elif H_type == 'sp3s':
-                            V_sSig, V_spSig1, V_spSig0, V_ppSig, VppPi, V_sepSig1,\
+                            V_sSig, V_spSig1, V_spSig0, V_ppSig, V_ppPi, V_sepSig1,\
                                 V_sepSig0 = data
                             
                     #this is required since we must account for anion s orbital
@@ -389,7 +383,7 @@ class LCAO:
                                 temp = V_sepSig1
                                 V_sepSig1 = V_sepSig0
                                 V_sepSig0 = temp
-                      
+                    print V_spSig0, cat_an, len(nearests)
                     #now add components
                     phase = np.exp(1.0j*np.dot(d, kpt))
                     l = np.dot(d/np.linalg.norm(d),[1,0,0])
@@ -401,7 +395,7 @@ class LCAO:
                     #pz1 s2 (-1) | pz1 px2 | pz1 py2 | pz1 pz2
                     
                     #VspSig0 is the s orbital (of the atom) to the neigh p
-                    #VspSig1 is the s orbital (of neigh) to atom p
+                    #VspSig1 is the s orbital (of neigh) to atom
                     H_off = np.matrix([
     [V_sSig * phase, V_spSig0 * l * phase,
          V_spSig0 * m * phase, V_spSig0 * n * phase], 
@@ -482,20 +476,20 @@ class LCAO:
         
 if __name__ == '__main__':
     
-    E_s = 0
-    E_p = 7.2
-    V_ssig = -2.032
-    V_sp = 2.546 #np.sqrt(3)/4*5.8
-    V_ppSig = 4.5475
-    V_ppPi = -1.085
+#    E_s = 0
+#    E_p = 7.2
+#    V_ssig = -2.032
+#    V_sp = 2.546 #np.sqrt(3)/4*5.8
+#    V_ppSig = 4.5475
+#    V_ppPi = -1.085
 
-    file_name = '/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/GaAs_2atom_wann.cif'
+    file_name = '/Users/cpashartis/Box Sync/Masters/LCAO_tightbinding/test_cifs/GaAs_2atom.cif'
     struct_t = "diamond"                               
     #zinc-blende / diamond
-    sym_pts = np.array([[0.5, 0.5,0.5],[0.0, 0.0, 0.0],
-                        [0.5, 0.0, 0.5], [5/8.,1/4.,5/8.], [0,0,0]],
+    sym_pts = np.array([[0.5, 0.0, 0.0],[0.0, 0.0, 0.0],
+                        [0.5, 0.5, 0.0], [5/8.,5/8.,1/4.], [0,0,0]],
                                     dtype = float)
     a = LCAO(file_name)
-    eig, kpt = a.build_diamond_nn_H(a.diamond_g, a.k_points(\
-        sym_pts = sym_pts), H_type = 'sp3s')#, file_name = 'III-V_wannier_sp3.dat')
+    eig, kpt = a.build_diamond_nn_H(a.k_points(\
+        sym_pts = sym_pts), H_type = 'sp3')#, file_name = 'III-V_wannier_sp3.dat')
     LCAO.plot_eigen(eig)

@@ -1,4 +1,4 @@
 #TightBinding Parameters Dictionary, sp3 source own work with Wannier functions
 #lattice constants will be added sometime
 #alloy lat	E_sa	E_sc	E_pa	E_pc	ssSigma	sapcSigma	scpaSigma	ppSigma	ppPi
-GaAs	3.99742 	-8.77210	-4.32453	0.87263	2.84323	-1.47257	1.06736	-1.15752	0.18067	1.1818
+GaAs	2.44791 	-8.77210	-4.32453	0.87263	2.84323	-1.47257	1.06736	1.15752	0.18067	1.1818
